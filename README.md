@@ -6,7 +6,7 @@
 
 This repository contains the official benchmark research comparing **Minimax** and **Codex** reasoning engines as the central intelligence for **GHOST** — an autonomous agent designed for end-to-end offensive operations.
 
-## ◉ The Research: Minimax vs. Codex
+## ◉ The Research: Minimax vs. Codex(more ai models are comming)
 We evaluated these models across 15 high-fidelity sessions involving:
 *   **Hacker101 CTF Track**: Real-world flag extraction across SQLi, Crypto, and IDOR vectors.
 *   **Pentest-Ground Track**: Systematic vulnerability assessment against hardened targets.
