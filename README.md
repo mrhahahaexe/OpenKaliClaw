@@ -14,7 +14,7 @@ We evaluated these models across 15 high-fidelity sessions involving:
 ### Key Finding
 While Minimax showed high reliability in systematic recon, **Codex** demonstrated superior chaining capability — achieving a **4/5 completion rate** on targets where Minimax often reached "satisficing traps."
 
-[**→ View Full Research Dashboard**]((https://openkaliclaw.onrender.com))
+[→ View Full Research Dashboard](https://openkaliclaw.onrender.com)
 
 ---
 
