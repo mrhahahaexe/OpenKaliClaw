@@ -21,7 +21,7 @@ with open(readme_path, 'r', encoding='utf-8') as f:
 
 # Load metadata for session counts
 session_count = 0
-models_str = "Minimax vs Codex"
+models_str = "Minimax M2 vs GPT 5.2 Codex"
 if os.path.exists(meta_path):
     with open(meta_path, 'r', encoding='utf-8') as f:
         meta = json.load(f)

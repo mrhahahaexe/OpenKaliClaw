@@ -926,7 +926,7 @@
     <section class="section" id="overview">
       <div class="section-label">Overview — Verified from ghost.db</div>
       <h2 class="section-title">By The Numbers</h2>
-      <p class="section-desc">All metrics verified directly from the GHOST SQLite database: messages, timestamps, tasks, drip_memory (context compressions), and task_steps tables. Minimax ran first on every target; Codex was called in where Minimax failed or produced partial results.</p>
+      <p class="section-desc">All metrics verified directly from the GHOST SQLite database: messages, timestamps, tasks, drip_memory (context compressions), and task_steps tables. Minimax M2 ran first on every target; GPT 5.2 Codex was called in where Minimax failed or produced partial results.</p>
       <div class="stats-row reveal">
         <div class="stat-card">
           <div class="stat-val"><!-- STATS_FLAGS -->31<!-- /STATS_FLAGS --></div>
@@ -938,11 +938,11 @@
         </div>
         <div class="stat-card">
           <div class="stat-val"><!-- STATS_FAILURES -->0<!-- /STATS_FAILURES --></div>
-          <div class="stat-lbl">Minimax pentest failures (out of 6)</div>
+          <div class="stat-lbl">Minimax M2 pentest failures (out of 6)</div>
         </div>
         <div class="stat-card">
           <div class="stat-val red"><!-- STATS_REFUSALS -->0<!-- /STATS_REFUSALS --></div>
-          <div class="stat-lbl">Codex safety refusals (Photo Gallery)</div>
+          <div class="stat-lbl">GPT 5.2 Codex safety refusals (Photo Gallery)</div>
         </div>
       </div>
     </section>

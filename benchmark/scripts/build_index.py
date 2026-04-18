@@ -79,11 +79,11 @@ for title, config in meta.items():
             if val: total_flags += int(val.group())
         except: pass
         
-    if model_name == 'Minimax' and ('FAIL' in flag_str.upper() or '0/' in flag_str or '1/' in flag_str):
+    if model_name == 'Minimax M2' and ('FAIL' in flag_str.upper() or '0/' in flag_str or '1/' in flag_str):
         if config.get('type') == 'Pentest' and 'FAIL' in flag_str.upper():
             minimax_fails += 1
             
-    if model_name == 'Codex' and '🚫' in flag_str:
+    if model_name == 'GPT 5.2 Codex' and '🚫' in flag_str:
         codex_refusals += 1
 
     results.append({
@@ -103,7 +103,7 @@ ctf_results = [r for r in results if r['type'] == 'CTF']
 pen_results = [r for r in results if r['type'] == 'Pentest']
 
 def gen_row(r):
-    m_cls = "codex" if r['model'] == 'Codex' else "minimax"
+    m_cls = "codex" if r['model'] == 'GPT 5.2 Codex' else "minimax"
     is_pass = ("✅" in r['outcome'] or re.search(r'^[3-9]/', r['outcome']))
     is_fail = ("🚫" in r['outcome'] or "FAIL" in r['outcome'].upper() or r['outcome'].startswith('0/'))
     s_cls = "pass" if is_pass else "fail" if is_fail else "unknown"
