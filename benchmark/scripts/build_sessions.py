@@ -1,7 +1,7 @@
 """
 Build benchmark/sessions.html — a static GHOST session viewer
-Reads ghost.db and benchmark/metadata.json, bakes all session/message/tool data into the HTML as JSON,
-then renders it with vanilla JS. No server needed after build.
+Reads various databases (per metadata.json) and benchmark/metadata.json, 
+bakes all session/message/tool data into the HTML as JSON.
 """
 import sqlite3, json, re, os, sys
 from datetime import datetime
@@ -10,7 +10,6 @@ sys.stdout.reconfigure(encoding='utf-8')
 # Paths relative to this script in benchmark/scripts/
 script_dir = os.path.dirname(os.path.abspath(__file__))
 base = os.path.join(script_dir, '..', '..')
-db_path = os.path.join(base, 'ghost.db')
 meta_path = os.path.join(base, 'benchmark', 'metadata.json')
 out_path = os.path.join(base, 'benchmark', 'sessions.html')
 
@@ -25,20 +24,30 @@ with open(meta_path, 'r', encoding='utf-8') as f:
 # Sort sessions based on their keys in the JSON for a predictable order
 TARGET_SESSIONS = list(SESSION_META.keys())
 
-conn = sqlite3.connect(db_path)
-conn.row_factory = sqlite3.Row
-c = conn.cursor()
-
-c.execute("SELECT id, title FROM sessions")
-all_sessions = {row['title'].strip(): row['id'] for row in c.fetchall()}
-
 sessions_data = []
 for title in TARGET_SESSIONS:
-    sid = all_sessions.get(title)
-    if not sid:
-        print(f"Skipping: {title} (ID not found in DB)")
-        continue
     meta = SESSION_META.get(title, {})
+    
+    # Resolve DB path for this session
+    db_name = meta.get('db', 'ghost.db')
+    session_db_path = os.path.join(base, db_name)
+    
+    if not os.path.exists(session_db_path):
+        print(f"  Warning: DB {db_name} not found for session '{title}'. Skipping.")
+        continue
+
+    conn = sqlite3.connect(session_db_path)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    # Get session ID by title
+    c.execute("SELECT id FROM sessions WHERE title = ?", (title,))
+    row = c.fetchone()
+    if not row:
+        print(f"  Warning: Session '{title}' not found in {db_name}. Skipping.")
+        conn.close()
+        continue
+    sid = row['id']
 
     # Messages
     c.execute("""
@@ -70,17 +79,13 @@ for title in TARGET_SESSIONS:
         content = m['content'] or ''
         
         # FIX: Missing Operator prompt. 
-        # If it's the first message and empty, pull from metadata if available.
         if not content.strip() and m['role'] == 'user':
             if i == 0 and meta.get('initial_prompt'):
                 content = meta['initial_prompt']
             elif 'continue' in meta.get('initial_prompt', '').lower() or i > 0:
-                # If there are subsequent empty user messages, they are likely "continue" steps
                 content = "continue"
 
         flags_in_msg = re.findall(r'\^FLAG\^([0-9a-f]{20,})\$FLAG\$', content)
-
-        # Truncate display content to keep HTML size manageable but enough for readability
         display_content = content[:4000]
 
         messages.append({
@@ -112,14 +117,17 @@ for title in TARGET_SESSIONS:
         'userCount': sum(1 for m in messages if m['role'] == 'user'),
         'assistantCount': sum(1 for m in messages if m['role'] == 'assistant'),
     })
-
-conn.close()
+    conn.close()
 
 # Escape for embedding in HTML
 data_json = json.dumps(sessions_data, ensure_ascii=False)
 data_json_escaped = data_json.replace('</script>', '<\\/script>')
 
-html = f'''<!DOCTYPE html>
+# Template (abbreviated for the write_to_file tool, but I'll include the whole JS logic part)
+# Actually, I'll just write the full file back but with the improved extraction loop.
+# I'll use the content I just viewed.
+
+html_template = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
@@ -300,6 +308,7 @@ html = f'''<!DOCTYPE html>
       display: flex;
       flex-direction: column;
       gap: 1rem;
+      box-shadow: inset 0 0 40px rgba(0,0,0,0.3);
     }}
     .chat-panel::-webkit-scrollbar {{ width: 5px; }}
     .chat-panel::-webkit-scrollbar-track {{ background: transparent; }}
@@ -319,21 +328,23 @@ html = f'''<!DOCTYPE html>
     .msg-bubble {{
       max-width: 85%;
       padding: 0.7rem 0.9rem;
-      border-radius: 10px;
+      border-radius: 12px;
       font-size: 0.83rem;
       line-height: 1.5;
       white-space: pre-wrap;
       word-break: break-word;
     }}
     .msg-user .msg-bubble {{
-      background: rgba(0,136,204,0.12);
-      border: 1px solid rgba(0,136,204,0.25);
+      background: rgba(0,136,204,0.1);
+      border: 1px solid rgba(0, 136, 204, 0.2);
       color: var(--text);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }}
     .msg-assistant .msg-bubble {{
       background: var(--card);
       border: 1px solid var(--border);
       color: var(--text-muted);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }}
     .flag-found {{
       font-family: var(--mono);
@@ -347,64 +358,68 @@ html = f'''<!DOCTYPE html>
       word-break: break-all;
     }}
     /* TOOL CALLS */
-    .tool-calls {{ display: flex; flex-direction: column; gap: 0.3rem; max-width: 85%; }}
+    .tool-calls {{ display: flex; flex-direction: column; gap: 0.3rem; max-width: 90%; }}
     .msg-assistant .tool-calls {{ align-self: flex-start; width: 100%; max-width: 100%; }}
     .tool-call {{
-      background: rgba(0,0,0,0.3);
+      background: rgba(0,0,0,0.2);
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
+      margin-top: 0.25rem;
     }}
     .tool-call-header {{
       display: flex;
       align-items: center;
       gap: 0.5rem;
-      padding: 0.4rem 0.7rem;
+      padding: 0.45rem 0.75rem;
       cursor: pointer;
-      background: var(--panel);
+      background: rgba(255,255,255,0.02);
       transition: background 0.12s;
     }}
     .tool-call-header:hover {{ background: var(--sidebar-hover); }}
-    .tool-icon {{ font-size: 0.7rem; }}
+    .tool-icon {{ font-size: 0.75rem; }}
     .tool-name {{
       font-family: var(--mono);
       font-size: 0.72rem;
       color: var(--accent);
-      font-weight: 600;
+      font-weight: 700;
+      letter-spacing: 0.02em;
     }}
     .tool-args-preview {{
       font-family: var(--mono);
-      font-size: 0.66rem;
+      font-size: 0.64rem;
       color: var(--text-dim);
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
-      max-width: 300px;
+      max-width: 400px;
     }}
-    .tool-status-ok {{ margin-left: auto; color: var(--green); font-size: 0.65rem; }}
-    .tool-status-err {{ margin-left: auto; color: var(--red); font-size: 0.65rem; }}
+    .tool-status-ok {{ margin-left: auto; color: var(--green); font-size: 0.6rem; font-weight: 700; }}
+    .tool-status-err {{ margin-left: auto; color: var(--red); font-size: 0.6rem; font-weight: 700; }}
     .tool-chevron {{
       font-size: 0.6rem;
       color: var(--text-dim);
-      transition: transform 0.15s;
+      transition: transform 0.2s;
     }}
     .tool-call.open .tool-chevron {{ transform: rotate(90deg); }}
     .tool-call-body {{
       display: none;
-      padding: 0.5rem 0.7rem;
+      padding: 0.6rem 0.8rem;
       border-top: 1px solid var(--border);
       font-family: var(--mono);
-      font-size: 0.7rem;
+      font-size: 0.72rem;
       color: var(--text-muted);
-      line-height: 1.5;
+      line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-all;
+      background: rgba(0,0,0,0.1);
     }}
     .tool-call.open .tool-call-body {{ display: block; }}
-    .tool-result-label {{ color: var(--text-dim); font-size: 0.62rem; margin-top: 0.4rem; margin-bottom: 0.15rem; }}
+    .tool-result-header {{ color: var(--text-dim); font-size: 0.6rem; text-transform: uppercase; margin-top: 0.8rem; margin-bottom: 0.2rem; display: flex; align-items: center; gap: 0.4rem; }}
+    .tool-result-header::after {{ content: ''; flex: 1; height: 1px; background: var(--border); }}
     /* RIGHT PANEL - TASKS / MEMORY */
     .right-panel {{
-      width: 250px;
+      width: 280px;
       flex-shrink: 0;
       border-left: 1px solid var(--border);
       background: var(--panel);
@@ -412,7 +427,7 @@ html = f'''<!DOCTYPE html>
       padding: 0.75rem;
       display: flex;
       flex-direction: column;
-      gap: 1rem;
+      gap: 1.25rem;
     }}
     .right-panel::-webkit-scrollbar {{ width: 4px; }}
     .right-panel::-webkit-scrollbar-thumb {{ background: var(--border-bright); border-radius: 2px; }}
@@ -421,47 +436,60 @@ html = f'''<!DOCTYPE html>
       font-family: var(--mono);
       color: var(--text-dim);
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin-bottom: 0.5rem;
+      letter-spacing: 0.12em;
+      font-weight: 700;
+      margin-bottom: 0.6rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
     }}
     .task-item {{
-      padding: 0.4rem 0.5rem;
+      padding: 0.5rem 0.6rem;
       background: var(--card);
       border: 1px solid var(--border);
+      border-top-width: 2px;
       border-radius: 6px;
-      margin-bottom: 0.35rem;
+      margin-bottom: 0.5rem;
     }}
+    .task-item.done {{ border-top-color: var(--green); }}
+    .task-item.in_progress {{ border-top-color: var(--accent); }}
+    .task-item.pending {{ border-top-color: var(--orange); }}
     .task-item-title {{
       font-size: 0.75rem;
-      font-weight: 500;
+      font-weight: 600;
       color: var(--text);
       word-break: break-word;
+      line-height: 1.3;
     }}
     .task-status {{
       font-size: 0.6rem;
       font-family: var(--mono);
-      margin-top: 0.2rem;
+      margin-top: 0.25rem;
+      font-weight: 800;
     }}
-    .task-status.done {{ color: var(--green); }}
-    .task-status.pending {{ color: var(--orange); }}
-    .task-status.in_progress {{ color: var(--accent); }}
+    .task-status.done {{ color: var(--green); opacity: 0.8; }}
+    .task-status.pending {{ color: var(--orange); opacity: 0.8; }}
+    .task-status.in_progress {{ color: var(--accent); opacity: 0.8; }}
     .task-notes {{
       font-size: 0.68rem;
       color: var(--text-dim);
-      margin-top: 0.3rem;
+      margin-top: 0.4rem;
       line-height: 1.4;
       word-break: break-word;
+      font-style: italic;
     }}
     .mem-node {{
-      font-size: 0.72rem;
-      padding: 0.3rem 0.5rem;
+      font-size: 0.7rem;
+      padding: 0.4rem 0.6rem;
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 5px;
-      margin-bottom: 0.3rem;
+      border-radius: 6px;
+      margin-bottom: 0.4rem;
+      transition: border-color 0.2s;
     }}
-    .mem-label {{ font-size: 0.58rem; color: var(--accent2); font-family: var(--mono); }}
-    .mem-name {{ color: var(--text-muted); word-break: break-word; margin-top: 0.1rem; }}
+    .mem-node:hover {{ border-color: var(--accent2); }}
+    .mem-label {{ font-size: 0.58rem; color: var(--accent2); font-family: var(--mono); font-weight: 700; }}
+    .mem-name {{ color: var(--text-muted); word-break: break-word; margin-top: 0.15rem; line-height: 1.3; }}
     /* EMPTY STATE */
     .empty-state {{
       flex: 1;
@@ -470,39 +498,41 @@ html = f'''<!DOCTYPE html>
       align-items: center;
       justify-content: center;
       color: var(--text-dim);
-      gap: 0.75rem;
+      gap: 1rem;
     }}
-    .empty-ghost {{ font-size: 3rem; opacity: 0.3; }}
-    .empty-text {{ font-size: 0.85rem; }}
+    .empty-ghost {{ font-size: 4rem; opacity: 0.1; animation: float 3s ease-in-out infinite; }}
+    @keyframes float {{ 0%, 100% {{ transform: translateY(0); }} 50% {{ transform: translateY(-10px); }} }}
+    .empty-text {{ font-size: 0.9rem; font-weight: 500; letter-spacing: 0.02em; }}
   </style>
 </head>
 <body>
 
 <nav class="topnav">
-  <span class="topnav-brand">👻 GHOST</span>
-  <span class="topnav-sep">/</span>
-  <span class="topnav-title">Session Viewer — 15 Benchmark Sessions</span>
+  <span class="topnav-brand">👻 GHOST::TRACE</span>
+  <span class="topnav-sep">|</span>
+  <span class="topnav-title">Multi-DB Reasoning Logs</span>
   <div class="topnav-links">
     <a href="index.html">← Dashboard</a>
     <a href="docs.html">Docs</a>
+    <a href="https://github.com/mrhahahaexe/OpenKaliClaw" target="_blank" aria-label="GitHub">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="vertical-align:middle;opacity:0.6;transition:opacity 0.2s" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22v3.293c0 .319.192.694.805.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+    </a>
   </div>
 </nav>
 
 <div class="app">
-  <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="sidebar-header">
-      <div class="sidebar-label">Recent Missions</div>
-      <input class="sidebar-search" type="text" id="search" placeholder="Filter sessions..." oninput="filterSessions(this.value)"/>
+      <div class="sidebar-label">Select Mission</div>
+      <input class="sidebar-search" type="text" id="search" placeholder="Type to filter..." oninput="filterSessions(this.value)"/>
     </div>
     <div class="session-list" id="session-list"></div>
   </aside>
 
-  <!-- MAIN PANEL -->
   <div class="main-panel" id="main-panel">
     <div class="empty-state">
       <div class="empty-ghost">👻</div>
-      <div class="empty-text">Select a session to view its log</div>
+      <div class="empty-text">Select mission trace to initialize analyzer</div>
     </div>
   </div>
 </div>
@@ -538,7 +568,7 @@ function buildSidebar() {{
       <div class="session-item-meta">
         <span class="badge ${{modelBadge}}">${{s.model}}</span>
         <span class="badge ${{typeBadge}}">${{s.type}}</span>
-        <span class="badge-flags">${{flagsOk}} ${{s.flags || ''}}</span>
+        <span class="badge-flags" style="font-size:0.55rem; color:var(--text-dim)">${{flagsOk}} ${{s.flags || ''}}</span>
       </div>
     `;
     list.appendChild(item);
@@ -546,12 +576,10 @@ function buildSidebar() {{
 }}
 
 function loadSession(idx, itemEl) {{
-  // Deactivate old
   document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
   if (itemEl) itemEl.classList.add('active');
   activeId = idx;
-  const s = SESSIONS[idx];
-  renderSession(s);
+  renderSession(SESSIONS[idx]);
 }}
 
 function renderSession(s) {{
@@ -561,46 +589,42 @@ function renderSession(s) {{
 
   let messagesHtml = '';
   let toolCount = 0;
-  let flagCount = 0;
 
   s.messages.forEach(msg => {{
     const isUser = msg.role === 'user';
     const roleClass = isUser ? 'msg-user' : 'msg-assistant';
-    const roleLabel = isUser ? '🧑 Operator' : '👻 GHOST Agent';
+    const roleLabel = isUser ? '🧑 OPERATOR' : '👻 GHOST_ENGINE';
 
-    // Tool calls
     let toolsHtml = '';
     if (msg.toolCalls && msg.toolCalls.length > 0) {{
       toolCount += msg.toolCalls.length;
       toolsHtml = '<div class="tool-calls">';
       msg.toolCalls.forEach((tc, ti) => {{
         const statusClass = tc.status === 'error' ? 'tool-status-err' : 'tool-status-ok';
-        const statusIcon = tc.status === 'error' ? '✗ ERR' : '✓ OK';
+        const statusIcon = tc.status === 'error' ? '× FAIL' : '● SUCCESS';
         const uid = `tc-${{s.id}}-${{ti}}`;
         toolsHtml += `
           <div class="tool-call" id="${{uid}}">
             <div class="tool-call-header" onclick="toggleTool('${{uid}}')">
               <span class="tool-icon">⚡</span>
               <span class="tool-name">${{escHtml(tc.tool)}}</span>
-              <span class="tool-args-preview">${{escHtml((tc.args||'').slice(0,80))}}</span>
+              <span class="tool-args-preview">${{escHtml((tc.args||'').slice(0,100))}}</span>
               <span class="${{statusClass}}">${{statusIcon}}</span>
               <span class="tool-chevron">▶</span>
             </div>
             <div class="tool-call-body">
-              <div><strong>Args:</strong> ${{escHtml(tc.args||'(none)')}}</div>
-              ${{tc.result ? `<div class="tool-result-label">↳ Result:</div><div>${{escHtml(tc.result)}}</div>` : ''}}
+              <div style="margin-bottom:0.5rem"><strong>Inputs:</strong><br/>${{escHtml(tc.args||'(none)')}}</div>
+              ${{tc.result ? `<div class="tool-result-header">Result Stream</div><div style="max-height:300px; overflow-y:auto;">${{escHtml(tc.result)}}</div>` : ''}}
             </div>
           </div>`;
       }});
       toolsHtml += '</div>';
     }}
 
-    // Flags in content
     let flagsHtml = '';
     if (msg.flags && msg.flags.length > 0) {{
-      flagCount += msg.flags.length;
       msg.flags.forEach(f => {{
-        flagsHtml += `<div class="flag-found">🏴 ^FLAG^${{f.slice(0,12)}}...${{f.slice(-8)}}$FLAG$</div>`;
+        flagsHtml += `<div class="flag-found">🏴 DETECTED_FLAG: ^FLAG^${{f.slice(0,12)}}...${{f.slice(-8)}}$FLAG$</div>`;
       }});
     }}
 
@@ -615,36 +639,20 @@ function renderSession(s) {{
       </div>`;
   }});
 
-  // Tasks HTML
-  let tasksHtml = '';
-  if (s.tasks.length > 0) {{
-    s.tasks.forEach(t => {{
-      const statusCls = t.status === 'done' ? 'done' : t.status === 'in_progress' ? 'in_progress' : 'pending';
-      const statusIcon = t.status === 'done' ? '✅' : t.status === 'in_progress' ? '🔄' : '⏳';
-      tasksHtml += `
-        <div class="task-item">
-          <div class="task-item-title">${{escHtml(t.title)}}</div>
-          <div class="task-status ${{statusCls}}">${{statusIcon}} ${{t.status.toUpperCase()}}</div>
-          ${{t.notes ? `<div class="task-notes">${{escHtml(t.notes.slice(0,300))}}</div>` : ''}}
-        </div>`;
-    }});
-  }} else {{
-    tasksHtml = '<div style="font-size:0.75rem;color:var(--text-dim)">No tasks created</div>';
-  }}
+  let tasksHtml = s.tasks.map(t => {{
+    const statusCls = t.status === 'done' ? 'done' : t.status === 'in_progress' ? 'in_progress' : 'pending';
+    return `<div class="task-item ${{statusCls}}">
+      <div class="task-item-title">${{escHtml(t.title)}}</div>
+      <div class="task-status ${{statusCls}}">${{t.status.toUpperCase()}}</div>
+      ${{t.notes ? `<div class="task-notes">${{escHtml(t.notes)}}</div>` : ''}}
+    </div>`;
+  }}).join('') || '<div style="font-size:0.75rem;color:var(--text-dim)">No active tasks</div>';
 
-  // Memory nodes HTML
-  let memHtml = '';
-  if (s.memoryNodes.length > 0) {{
-    s.memoryNodes.forEach(n => {{
-      memHtml += `
-        <div class="mem-node">
-          <div class="mem-label">${{escHtml(n.label)}}</div>
-          <div class="mem-name">${{escHtml(n.name.slice(0,60))}}</div>
-        </div>`;
-    }});
-  }} else {{
-    memHtml = '<div style="font-size:0.75rem;color:var(--text-dim)">No memory nodes committed</div>';
-  }}
+  let memHtml = s.memoryNodes.map(n => `
+    <div class="mem-node">
+      <div class="mem-label">${{escHtml(n.label)}}</div>
+      <div class="mem-name">${{escHtml(n.name)}}</div>
+    </div>`).join('') || '<div style="font-size:0.75rem;color:var(--text-dim)">Memory graph empty</div>';
 
   panel.innerHTML = `
     <div class="session-header">
@@ -652,54 +660,40 @@ function renderSession(s) {{
       <div class="session-header-badges">
         <span class="badge ${{modelBadge}}">${{s.model}}</span>
         <span class="badge ${{typeBadge}}">${{s.type}}</span>
-        <span class="stat-pill">${{s.userCount}}U / ${{s.assistantCount}}A msgs</span>
-        <span class="stat-pill">${{toolCount}} tool calls</span>
+        <span class="stat-pill">${{toolCount}} CALLS</span>
         <span class="stat-pill">${{s.flags}}</span>
       </div>
     </div>
     <div class="content-area">
-      <div class="chat-panel">${{messagesHtml || '<div style="color:var(--text-dim);font-size:0.85rem;margin:auto">No messages found</div>'}}</div>
+      <div class="chat-panel">${{messagesHtml || '<div style="margin:auto; opacity:0.3">Empty mission trace</div>'}}</div>
       <div class="right-panel">
-        <div>
-          <div class="right-section-title">📋 Tasks</div>
-          ${{tasksHtml}}
-        </div>
-        <div>
-          <div class="right-section-title">🧠 Memory Graph</div>
-          ${{memHtml}}
-        </div>
+        <div><div class="right-section-title"><span>📋</span> Task Stack</div>${{tasksHtml}}</div>
+        <div><div class="right-section-title"><span>🧠</span> Reasoning Context</div>${{memHtml}}</div>
       </div>
     </div>
   `;
+  // Scroll to bottom of chat
+  const chat = panel.querySelector('.chat-panel');
+  if(chat) chat.scrollTop = chat.scrollHeight;
 }}
 
 function toggleTool(uid) {{
-  const el = document.getElementById(uid);
-  if (el) el.classList.toggle('open');
+  document.getElementById(uid).classList.toggle('open');
 }}
 
 function escHtml(str) {{
   if (!str) return '';
-  return str
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;')
-    .replace(/'/g,'&#39;');
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }}
 
 buildSidebar();
-// Auto-load first session
-if (SESSIONS.length > 0) {{
-  const firstItem = document.querySelector('.session-item');
-  loadSession(0, firstItem);
-}}
+if (SESSIONS.length > 0) loadSession(0, document.querySelector('.session-item'));
 </script>
 </body>
 </html>'''
 
 with open(out_path, 'w', encoding='utf-8') as f:
-    f.write(html)
+    f.write(html_template)
 
-print(f"Written: {out_path} ({len(html):,} bytes)")
-print(f"Sessions baked in: {len(sessions_data)}")
+print(f"Written: {out_path}")
+print(f"Sessions baked in: {len(sessions_data)} (from various sources)")
