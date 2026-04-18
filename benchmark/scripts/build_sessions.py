@@ -187,7 +187,16 @@ html_template = f'''<!DOCTYPE html>
     }}
     .topnav-sep {{ color: var(--text-dim); font-size: 0.7rem; }}
     .topnav-title {{ font-size: 0.78rem; color: var(--text-muted); }}
-    .topnav-links {{ margin-left: auto; display: flex; gap: 0.75rem; }}
+    .topnav-links {{ margin-left: auto; display: flex; gap: 0.75rem; align-items: center; }}
+    .menu-toggle {{
+      display: none;
+      background: none;
+      border: none;
+      color: var(--text);
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 0.5rem;
+    }}
     .topnav-links a {{
       font-size: 0.75rem;
       color: var(--text-dim);
@@ -503,11 +512,44 @@ html_template = f'''<!DOCTYPE html>
     .empty-ghost {{ font-size: 4rem; opacity: 0.1; animation: float 3s ease-in-out infinite; }}
     @keyframes float {{ 0%, 100% {{ transform: translateY(0); }} 50% {{ transform: translateY(-10px); }} }}
     .empty-text {{ font-size: 0.9rem; font-weight: 500; letter-spacing: 0.02em; }}
+
+    /* MOBILE RESPONSIVE */
+    @media (max-width: 900px) {{
+      .menu-toggle {{ display: block; }}
+      .sidebar {{
+        position: fixed;
+        top: 44px;
+        left: -100%;
+        bottom: 0;
+        z-index: 100;
+        width: 85%;
+        transition: left 0.3s ease;
+        box-shadow: 20px 0 50px rgba(0,0,0,0.5);
+      }}
+      body.menu-open .sidebar {{ left: 0; }}
+      .content-area {{ flex-direction: column; overflow-y: auto; }}
+      .chat-panel {{ flex: none; overflow-y: visible; width: 100%; }}
+      .right-panel {{ width: 100%; border-left: none; border-top: 1px solid var(--border); }}
+      .msg-bubble {{ max-width: 95%; }}
+      .msg-assistant .tool-calls {{ max-width: 100%; }}
+      .sidebar-overlay {{
+        display: none;
+        position: fixed;
+        top: 44px;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.6);
+        z-index: 99;
+      }}
+      body.menu-open .sidebar-overlay {{ display: block; }}
+    }}
   </style>
 </head>
 <body>
 
 <nav class="topnav">
+  <button class="menu-toggle" onclick="toggleMenu()" aria-label="Toggle Sessions">☰</button>
   <span class="topnav-brand">👻 GHOST::TRACE</span>
   <span class="topnav-sep">|</span>
   <span class="topnav-title">Multi-DB Reasoning Logs</span>
@@ -537,6 +579,8 @@ html_template = f'''<!DOCTYPE html>
   </div>
 </div>
 
+<div class="sidebar-overlay" onclick="toggleMenu()"></div>
+
 <script>
 const SESSIONS = {data_json_escaped};
 
@@ -559,7 +603,7 @@ function buildSidebar() {{
     item.dataset.idx = i;
     item.onclick = () => loadSession(i, item);
 
-    const modelBadge = s.model === 'Codex' ? 'badge-codex' : 'badge-minimax';
+    const modelBadge = s.model === 'GPT 5.2 Codex' ? 'badge-codex' : 'badge-minimax';
     const typeBadge = s.type === 'CTF' ? 'badge-ctf' : 'badge-pentest';
     const flagsOk = (s.flags || '').includes('FAIL') ? '❌' : (s.flags || '').includes('🚫') ? '🚫' : '✅';
 
@@ -575,7 +619,12 @@ function buildSidebar() {{
   }});
 }}
 
+function toggleMenu() {{
+  document.body.classList.toggle('menu-open');
+}}
+
 function loadSession(idx, itemEl) {{
+  document.body.classList.remove('menu-open'); // Auto-close on select
   document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
   if (itemEl) itemEl.classList.add('active');
   activeId = idx;
@@ -584,7 +633,7 @@ function loadSession(idx, itemEl) {{
 
 function renderSession(s) {{
   const panel = document.getElementById('main-panel');
-  const modelBadge = s.model === 'Codex' ? 'badge-codex' : 'badge-minimax';
+  const modelBadge = s.model === 'GPT 5.2 Codex' ? 'badge-codex' : 'badge-minimax';
   const typeBadge = s.type === 'CTF' ? 'badge-ctf' : 'badge-pentest';
 
   let messagesHtml = '';
